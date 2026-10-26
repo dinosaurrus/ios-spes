@@ -1,3 +1,63 @@
+# Clean rebuild from a fresh clone: /product guard, 60 Hz default, cache-bust images, 2026-10-26
+
+- The user asked for a from-scratch build in a new directory from
+  `github.com/AdyaGMD/ios-spes`, leaving the old trees untouched. Fresh clone:
+  `/home/dino/ios-spes-clean`, branch `spes`, HEAD `982e045` + three local
+  commits (`391f0ba`, `beffa4d`, this notes commit). Kernel built by the
+  repository's own `xnu` workflow on the fork `dinosaurrus/ios-spes`:
+  CI 40372133351 SUCCESS, kernel SHA256
+  `188f053099009ced4e71c5671146750e7c3333be1ab6259006b513f066e4906a`
+  (`research/kernel-all34.sweet`). Patch set identical to upstream `9962147`
+  (0156); the differing hash from upstream's `a4e333f6` is build
+  non-determinism, not a source difference (`git diff 9962147..HEAD -- xnu/patches`
+  is empty).
+- Private inputs copied in: `research/ipsw-x/d22ap.adt`
+  (SHA256 9e670987c8..., the real D22AP tree) and `dtb/spes-live.dtb`
+  (74ad92ce...). `tools/mkadt.py` now fails hard when the D22AP tree is
+  missing instead of silently emitting an ADT without `/product` (the
+  2026-10-26 black screen: SpringBoard aborts on
+  `BoundingPathBitmap-1125x2436-375x812-3.00x`).
+- The ADT now reports the full iPhone X product node: subtype 0x984 (2436),
+  idiom phone, scale 3, `graphics-featureset-class` APPLE4, gamut sRGB.
+  `MKADT_UNIQUE_CHIP_ID` is available; the primary images use
+  `0x5350455300000002`, because the MobileGestalt disk cache is keyed by
+  build+IOPlatformUUID and the identity-less boots filled the old key. That
+  is a boot-image-only cache bust (the root has no ByHost prefs; the keybag's
+  `chip-id` is unchanged).
+- `tools/build-spes-ios-graphics.sh` now takes `SWEET_GPU`, `SWEET_GL_SYNC`,
+  `SWEET_FB_NOCONSOLE`, `SWEET_FB_DIRECT` and `SWEET_FB_RATE`, defaulting to
+  the tested values: GPU on (`spesgpu=1 spesgpuprobe=1 spesgpu_mhz=300
+  glsync=1`), console stopped at the first frame, and **`sweetfb_rate=0`
+  (60 Hz)** — patch 0154 defaults to 90 Hz, where the UI stops drawing and
+  touch dies (all32, 2026-10-26). Every working image since passed
+  `sweetfb_rate=0`.
+- Images built in `/home/dino/ios-spes-clean/shim/out` from
+  `research/kernel-all34.sweet` and `dtb/spes-live.dtb` (all 17,719,296 B,
+  boot header v3, payload verified: `cpus=6`, UFS userdata root, product node
+  present, `spesgpu=1`, `glsync=1`, `sweetfb_hz=60`, `sweetfb_rate=0`):
+  - `spes-ios-graphics.img` bea0c0e5... — primary, new UUID, no console text
+  - `spes-ios-graphics-nocache.img` bea0c0e5... — identical copy of primary
+  - `spes-ios-console.img` 254411a5... — new UUID, kernel console visible
+  - `spes-ios-graphics-olduuid.img` 3c887b9b... — old UUID 0x...0001 (A/B)
+- Root: the flashed root is still the 2026-10-23 setup-only snapshot. It has
+  the `sweet-root-tweaks.py` changes but **no `/redwood` GPU userland**
+  (`libredwood-gl.dylib` / `libOSMesa.8.dylib`, the EAGL bridge). That
+  library was installed on the phone on 2026-10-24 and was lost when the
+  snapshot was flashed back; it is not in any saved image or delta. The
+  kernel-side RedwoodGPU service is in the boot image and stays on, so the
+  GPU is initialised, but CoreAnimation cannot use it without the userland
+  bridge: expect the CPU-drawn (slow) UI, not the GPU-drawn one, until that
+  root change is redone. Touch and buttons are untouched by these images.
+- Not done here: rebuilding the EAGL/Mesa userland needs a macOS host
+  (`tools/build-spes-mesa-macos.sh`, `build-spes-eagl-macos.sh`) and writing
+  it into the root needs HFSX write access (the old procedure used an APFS
+  clone + mount on macOS). This Linux host can only read HFSX, so the root
+  change is a separate step (CI build + a device/macOS install).
+- Next: boot `spes-ios-graphics.img`. If the home screen appears, the stale
+  MobileGestalt cache / missing product node was the blocker. If it stays
+  black, boot `spes-ios-console.img` and pull the ring with
+  `tools/sweet-log-pull.sh` from OrangeFox.
+
 # all34 result: TURNIP RUNS ON THE A610; Metal device refused (Turnip reports Vulkan 1.0); probe files lost, 2026-10-26
 
 - Log research/spes-all34-boot.txt (1726223 B, flush #54): UI fine (frame 3940);
