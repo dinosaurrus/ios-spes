@@ -51,8 +51,18 @@ def d22ap_product(path=D22AP_ADT):
     """/product properties of the real D22AP tree, without the syscfg
     placeholders iBoot would fill in (flag bit set) and the node bookkeeping."""
     if not os.path.exists(path):
-        print(f'warning: {path} missing, no /product node', file=sys.stderr)
-        return None
+        # An identity-less ADT still boots, but MobileGestalt then has no
+        # artwork-device-subtype (2436) / idiom / scale / gamut, and SpringBoard
+        # aborts looking up BoundingPathBitmap-1125x2436-375x812-3.00x.
+        # Never let that happen silently again (it cost a boot cycle 2026-10-26).
+        if os.environ.get('MKADT_NO_PRODUCT') == '1':
+            print(f'warning: {path} missing, no /product node (MKADT_NO_PRODUCT=1)',
+                  file=sys.stderr)
+            return None
+        raise SystemExit(
+            f'{path} missing: the iOS identity depends on the real D22AP /product node.\n'
+            'Extract it (see the comment above D22AP_ADT) or set MKADT_NO_PRODUCT=1\n'
+            'for a deliberately identity-less test ADT.')
     root, _ = adt.parse(open(path, 'rb').read())
     for c in root.children:
         if dict((k, v) for k, f, v in c.props).get('name') == b'product\0':
@@ -124,7 +134,13 @@ def build(seed=None, qemu=False, highmem=False, device="topaz", memory=None):
         # files), so e.g. DataMigration never records LastSystemVersion and
         # migrates on every boot. Synthetic ECID (not the phone's); chip-id
         # of the A11 that the iPhone X userland expects.
-        ('unique-chip-id', struct.pack('<Q', 0x5350455300000001 if device == 'spes' else SWEET_ECID)),
+        # MKADT_UNIQUE_CHIP_ID=0x... changes IOPlatformUUID, which is also the
+        # MobileGestalt disk-cache key (build+UUID): a boot-image-only way to
+        # discard stale answers (e.g. from an identity-less ADT) without a
+        # root write. Keep the default unless a cache bust is needed.
+        ('unique-chip-id', struct.pack('<Q', int(os.environ.get(
+            'MKADT_UNIQUE_CHIP_ID',
+            '0x5350455300000001' if device == 'spes' else hex(SWEET_ECID)), 0))),
         ('chip-id', u32(0x8015)),
         # Security status as on a dev-fused, undemoted board (tuple 0,0,1,1):
         # MobileGestalt reads these from /chosen, and mobileactivationd's
